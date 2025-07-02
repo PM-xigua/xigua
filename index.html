@@ -6,6 +6,682 @@
     <title>密码管理器</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <!-- 引入Firebase模块化SDK -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
+        import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js";
+        import { getAnalytics } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-analytics.js";
+
+        // 初始化Firebase
+        const firebaseConfig = {
+            apiKey: "AIzaSyBeHC5dGcUyNQRUOW-zmifmDqY37G9f22c",
+            authDomain: "password-manager-4d734.firebaseapp.com",
+            projectId: "password-manager-4d734",
+            storageBucket: "password-manager-4d734.firebasestorage.app",
+            messagingSenderId: "901744164367",
+            appId: "1:901744164367:web:6d840fe4a7a991fd8eed7a",
+            measurementId: "G-JH42TB8H78"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const analytics = getAnalytics(app);
+        const auth = getAuth(app);
+        const db = getDatabase(app);
+
+        // 全局数据模型
+        const data = {
+            categories: [
+                { id: 'uncategorized', name: '未分类' }
+            ],
+            websites: [],
+            nextWebsiteId: 1,
+            nextCategoryId: 2,
+            verificationCode: '329650317',
+            cloudSynced: false
+        };
+
+        let currentUser = null;
+
+        // 初始化函数
+        function init() {
+            // 监听登录状态
+            onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    currentUser = user;
+                    console.log("用户已登录，ID:", user.uid);
+                    loadDataFromCloud();
+                } else {
+                    currentUser = null;
+                    console.log("用户未登录");
+                    loadLocalData();
+                }
+            });
+
+            // 尝试匿名登录
+            signInAnonymously(auth)
+                .catch((error) => {
+                    console.error("匿名登录失败:", error);
+                    showCopyToast('云端同步失败，使用本地存储');
+                    loadLocalData();
+                });
+
+            // 添加同步状态指示器
+            addSyncIndicator();
+            
+            // 初始化事件监听
+            initEventListeners();
+        }
+
+        // 从云端加载数据
+        function loadDataFromCloud() {
+            if (!currentUser) return;
+
+            const userRef = ref(db, `users/${currentUser.uid}`);
+            
+            onValue(userRef, (snapshot) => {
+                const cloudData = snapshot.val();
+                if (cloudData) {
+                    Object.assign(data, cloudData);
+                    data.cloudSynced = true;
+                    renderCategories();
+                    renderWebsites();
+                    showCopyToast('已同步云端数据');
+                } else {
+                    // 云端无数据时加载本地数据并同步到云端
+                    loadLocalData();
+                    saveDataToCloud();
+                }
+            }, (error) => {
+                console.error("云端数据监听失败:", error);
+                data.cloudSynced = false;
+                showCopyToast('云端连接失败');
+            });
+        }
+
+        // 保存数据到云端
+        function saveDataToCloud() {
+            if (!currentUser) return;
+
+            const userRef = ref(db, `users/${currentUser.uid}`);
+            set(userRef, data)
+                .then(() => {
+                    data.cloudSynced = true;
+                    console.log("数据已同步到云端");
+                })
+                .catch((error) => {
+                    console.error("云端保存失败:", error);
+                    data.cloudSynced = false;
+                });
+        }
+
+        // 加载本地数据
+        function loadLocalData() {
+            const savedData = localStorage.getItem('passwordManagerData');
+            if (savedData) {
+                try {
+                    const parsedData = JSON.parse(savedData);
+                    Object.assign(data, parsedData);
+                } catch (e) {
+                    console.error('解析本地数据失败:', e);
+                }
+            }
+            renderCategories();
+            renderWebsites();
+        }
+
+        // 保存数据（本地+云端）
+        function saveData() {
+            localStorage.setItem('passwordManagerData', JSON.stringify(data));
+            if (currentUser) {
+                saveDataToCloud();
+            }
+        }
+
+        // 添加同步状态指示器
+        function addSyncIndicator() {
+            const header = document.querySelector('header .flex.items-center.justify-between');
+            const syncIndicator = document.createElement('div');
+            syncIndicator.className = 'flex items-center text-sm mx-4';
+            syncIndicator.innerHTML = `
+                <i class="fa fa-cloud mr-1" id="sync-icon"></i>
+                <span id="sync-status">同步中...</span>
+            `;
+            header.appendChild(syncIndicator);
+
+            // 更新同步状态显示
+            setInterval(() => {
+                const icon = document.getElementById('sync-icon');
+                const status = document.getElementById('sync-status');
+
+                if (data.cloudSynced) {
+                    icon.className = 'fa fa-cloud text-apple-green mr-1';
+                    status.textContent = '已同步';
+                } else if (currentUser) {
+                    icon.className = 'fa fa-cloud text-apple-yellow mr-1';
+                    status.textContent = '同步中...';
+                } else {
+                    icon.className = 'fa fa-cloud text-apple-red mr-1';
+                    status.textContent = '本地存储';
+                }
+            }, 1000);
+        }
+
+        // 以下为原有功能函数（保持不变）
+        function initEventListeners() {
+            // 登录表单提交
+            document.getElementById('login-form').addEventListener('submit', function(e) {
+                e.preventDefault();
+                const codeInput = document.getElementById('verification-code');
+                if (codeInput.value === data.verificationCode) {
+                    document.getElementById('login-page').classList.add('hidden');
+                    document.getElementById('app').classList.remove('hidden');
+                    document.getElementById('verification-error').classList.add('hidden');
+                    codeInput.value = '';
+                } else {
+                    document.getElementById('verification-error').classList.remove('hidden');
+                    codeInput.focus();
+                }
+            });
+
+            // 登出按钮
+            document.getElementById('logout-btn').addEventListener('click', function() {
+                document.getElementById('app').classList.add('hidden');
+                document.getElementById('login-page').classList.remove('hidden');
+            });
+
+            // 添加分类按钮
+            document.getElementById('add-category-btn').addEventListener('click', function() {
+                document.getElementById('category-name').value = '';
+                document.getElementById('add-category-modal').classList.remove('hidden');
+                document.getElementById('category-name').focus();
+            });
+
+            // 关闭分类模态框
+            document.getElementById('close-category-modal').addEventListener('click', function() {
+                document.getElementById('add-category-modal').classList.add('hidden');
+            });
+
+            document.getElementById('cancel-add-category').addEventListener('click', function() {
+                document.getElementById('add-category-modal').classList.add('hidden');
+            });
+
+            // 添加分类表单
+            document.getElementById('add-category-form').addEventListener('submit', function(e) {
+                e.preventDefault();
+                const name = document.getElementById('category-name').value.trim();
+                if (name) {
+                    data.categories.push({
+                        id: 'category_' + data.nextCategoryId++,
+                        name: name
+                    });
+                    saveData();
+                    renderCategories();
+                    document.getElementById('add-category-modal').classList.add('hidden');
+                }
+            });
+
+            // 添加网站按钮
+            document.getElementById('add-website-btn').addEventListener('click', function() {
+                resetWebsiteForm();
+                document.getElementById('website-modal').classList.remove('hidden');
+                document.getElementById('website-name').focus();
+            });
+
+            // 关闭网站模态框
+            document.getElementById('close-website-modal').addEventListener('click', function() {
+                document.getElementById('website-modal').classList.add('hidden');
+            });
+
+            document.getElementById('cancel-website').addEventListener('click', function() {
+                document.getElementById('website-modal').classList.add('hidden');
+            });
+
+            // 添加账号按钮
+            document.getElementById('add-account-btn').addEventListener('click', function() {
+                addAccountField();
+            });
+
+            // 网站表单提交
+            document.getElementById('website-form').addEventListener('submit', function(e) {
+                e.preventDefault();
+                const websiteId = document.getElementById('website-id').value;
+                const name = document.getElementById('website-name').value.trim();
+                const categoryId = document.getElementById('website-category').value;
+                const url = document.getElementById('website-url').value.trim();
+                const description = document.getElementById('website-description').value.trim();
+                
+                const accounts = [];
+                document.querySelectorAll('#accounts-container > div').forEach(accDiv => {
+                    const nameEl = accDiv.querySelector('.account-name');
+                    const userEl = accDiv.querySelector('.account-username');
+                    const passEl = accDiv.querySelector('.account-password');
+                    
+                    if (userEl.value.trim() && passEl.value.trim()) {
+                        accounts.push({
+                            name: nameEl.value.trim(),
+                            username: userEl.value.trim(),
+                            password: passEl.value.trim()
+                        });
+                    }
+                });
+                
+                if (name && categoryId && url && accounts.length > 0) {
+                    if (websiteId) {
+                        const index = data.websites.findIndex(w => w.id === websiteId);
+                        if (index !== -1) {
+                            data.websites[index] = { ...data.websites[index], name, categoryId, url, description, accounts };
+                        }
+                    } else {
+                        data.websites.push({
+                            id: 'website_' + data.nextWebsiteId++,
+                            name, categoryId, url, description, accounts
+                        });
+                    }
+                    
+                    saveData();
+                    renderWebsites();
+                    document.getElementById('website-modal').classList.add('hidden');
+                }
+            });
+
+            // 关闭详情模态框
+            document.getElementById('close-details-modal').addEventListener('click', function() {
+                document.getElementById('view-details-modal').classList.add('hidden');
+            });
+
+            // 编辑网站
+            document.getElementById('edit-website-btn').addEventListener('click', function() {
+                const id = this.dataset.id;
+                if (id) {
+                    document.getElementById('view-details-modal').classList.add('hidden');
+                    loadWebsiteForm(id);
+                    document.getElementById('website-modal').classList.remove('hidden');
+                }
+            });
+
+            // 密码显示切换
+            document.addEventListener('click', function(e) {
+                if (e.target.classList.contains('toggle-password')) {
+                    const input = e.target.closest('.relative').querySelector('input');
+                    const icon = e.target.querySelector('i');
+                    
+                    if (input.type === 'password') {
+                        input.type = 'text';
+                        icon.classList.replace('fa-eye-slash', 'fa-eye');
+                    } else {
+                        input.type = 'password';
+                        icon.classList.replace('fa-eye', 'fa-eye-slash');
+                    }
+                }
+            });
+
+            // 账号删除
+            document.addEventListener('click', function(e) {
+                if (e.target.closest('.delete-account-btn')) {
+                    const accDiv = e.target.closest('.border');
+                    if (document.querySelectorAll('#accounts-container > div').length > 1) {
+                        accDiv.remove();
+                    } else {
+                        accDiv.querySelectorAll('input').forEach(input => input.value = '');
+                    }
+                }
+            });
+
+            // 复制功能
+            document.addEventListener('click', function(e) {
+                if (e.target.closest('.copy-btn')) {
+                    const btn = e.target.closest('.copy-btn');
+                    const text = btn.dataset.value;
+                    const type = btn.dataset.type;
+                    
+                    navigator.clipboard.writeText(text)
+                        .then(() => showCopyToast(type === 'username' ? '账号已复制' : '密码已复制'))
+                        .catch(() => showCopyToast('复制失败，请手动复制'));
+                }
+            });
+
+            // 分类筛选
+            document.addEventListener('click', function(e) {
+                if (e.target.closest('.category-item')) {
+                    const catId = e.target.closest('.category-item').dataset.id;
+                    document.querySelectorAll('.category-item').forEach(item => {
+                        item.classList.toggle('bg-white/70', item.dataset.id === catId);
+                    });
+                    renderWebsites(catId);
+                }
+            });
+
+            // 拖拽排序
+            let draggedItem = null;
+            const grid = document.getElementById('websites-grid');
+            
+            grid.addEventListener('dragstart', (e) => {
+                if (e.target.closest('.website-card')) {
+                    draggedItem = e.target.closest('.website-card');
+                    setTimeout(() => draggedItem.classList.add('dragging'), 0);
+                }
+            });
+            
+            grid.addEventListener('dragend', () => {
+                if (draggedItem) {
+                    draggedItem.classList.remove('dragging');
+                    draggedItem = null;
+                    updateWebsiteOrder();
+                }
+            });
+            
+            grid.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                const afterEl = getDragAfterElement(grid, e.clientY);
+                if (draggedItem && afterEl) {
+                    grid.insertBefore(draggedItem, afterEl);
+                } else if (draggedItem) {
+                    grid.appendChild(draggedItem);
+                }
+            });
+        }
+
+        // 渲染分类
+        function renderCategories() {
+            const list = document.getElementById('categories-list');
+            list.innerHTML = `
+                <div class="category-item flex items-center justify-between p-2 rounded-lg bg-white/70 cursor-pointer transition-all" data-id="all">
+                    <div class="flex items-center">
+                        <i class="fa fa-folder-open mr-2"></i>
+                        <span>全部网站</span>
+                    </div>
+                    <span class="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">${data.websites.length}</span>
+                </div>
+            `;
+
+            data.categories.forEach(cat => {
+                const count = data.websites.filter(w => w.categoryId === cat.id).length;
+                const item = document.createElement('div');
+                item.className = 'category-item flex items-center justify-between p-2 rounded-lg hover:bg-white/50 cursor-pointer transition-all';
+                item.dataset.id = cat.id;
+                item.innerHTML = `
+                    <div class="flex items-center">
+                        <i class="fa fa-folder mr-2"></i>
+                        <span>${cat.name}</span>
+                    </div>
+                    <span class="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">${count}</span>
+                `;
+                list.appendChild(item);
+            });
+
+            // 更新分类选择器
+            const select = document.getElementById('website-category');
+            select.innerHTML = '<option value="">请选择分类</option>';
+            data.categories.forEach(cat => {
+                const opt = document.createElement('option');
+                opt.value = cat.id;
+                opt.textContent = cat.name;
+                select.appendChild(opt);
+            });
+        }
+
+        // 渲染网站卡片
+        function renderWebsites(categoryId = 'all') {
+            const grid = document.getElementById('websites-grid');
+            const empty = document.getElementById('empty-state');
+            
+            let filtered = data.websites;
+            if (categoryId !== 'all') {
+                filtered = data.websites.filter(w => w.categoryId === categoryId);
+            }
+            
+            if (filtered.length === 0) {
+                grid.classList.add('hidden');
+                empty.classList.remove('hidden');
+                return;
+            }
+            
+            grid.classList.remove('hidden');
+            empty.classList.add('hidden');
+            grid.innerHTML = '';
+            
+            filtered.forEach(website => {
+                const cat = data.categories.find(c => c.id === website.categoryId) || { name: '未知' };
+                const firstAcc = website.accounts[0] || { username: '无', password: '无' };
+                
+                const card = document.createElement('div');
+                card.className = 'website-card glass-effect rounded-xl overflow-hidden card-hover';
+                card.dataset.id = website.id;
+                card.draggable = true;
+                card.innerHTML = `
+                    <div class="p-4">
+                        <div class="flex justify-between items-start mb-3">
+                            <h3 class="font-semibold text-lg truncate">${website.name}</h3>
+                            <span class="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">${cat.name}</span>
+                        </div>
+                        <div class="text-sm text-apple-gray mb-3 line-clamp-2">${website.description || '无描述'}</div>
+                        <div class="text-sm text-apple-blue mb-4 hover:underline truncate">${website.url}</div>
+                        <div class="space-y-2">
+                            <div class="flex items-center justify-between p-2 bg-white/50 rounded-lg">
+                                <div class="flex items-center">
+                                    <i class="fa fa-user-circle text-apple-gray mr-2"></i>
+                                    <span class="font-medium">${firstAcc.name || '账号'}</span>
+                                </div>
+                                <div class="flex items-center space-x-2">
+                                    <div class="copy-btn relative group" data-value="${firstAcc.username}" data-type="username">
+                                        <span class="text-sm hover:text-primary">${firstAcc.username}</span>
+                                        <span class="absolute -bottom-8 left-1/2 transform -translate-x-1/2 bg-dark text-white text-xs px-2 py-1 rounded opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all">点击复制</span>
+                                    </div>
+                                    <i class="fa fa-clipboard text-apple-gray copy-btn" data-value="${firstAcc.username}" data-type="username"></i>
+                                </div>
+                            </div>
+                            <div class="flex items-center justify-between p-2 bg-white/50 rounded-lg">
+                                <div class="flex items-center">
+                                    <i class="fa fa-key text-apple-gray mr-2"></i>
+                                    <span class="font-medium">密码</span>
+                                </div>
+                                <div class="flex items-center space-x-2">
+                                    <div class="copy-btn relative group" data-value="${firstAcc.password}" data-type="password">
+                                        <span class="text-sm hover:text-primary">••••••••</span>
+                                        <span class="absolute -bottom-8 left-1/2 transform -translate-x-1/2 bg-dark text-white text-xs px-2 py-1 rounded opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all">点击复制</span>
+                                    </div>
+                                    <i class="fa fa-clipboard text-apple-gray copy-btn" data-value="${firstAcc.password}" data-type="password"></i>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mt-4 flex justify-end">
+                            <button class="view-details-btn text-sm text-apple-blue hover:text-blue-700 flex items-center" data-id="${website.id}">
+                                <span>查看详情</span>
+                                <i class="fa fa-angle-right ml-1"></i>
+                            </button>
+                        </div>
+                    </div>
+                `;
+                
+                grid.appendChild(card);
+                card.querySelector('.view-details-btn').addEventListener('click', () => {
+                    loadWebsiteDetails(website.id);
+                });
+            });
+        }
+
+        // 重置网站表单
+        function resetWebsiteForm() {
+            document.getElementById('website-id').value = '';
+            document.getElementById('website-name').value = '';
+            document.getElementById('website-category').value = '';
+            document.getElementById('website-url').value = '';
+            document.getElementById('website-description').value = '';
+            document.getElementById('accounts-container').innerHTML = '';
+            addAccountField();
+        }
+
+        // 添加账号字段
+        function addAccountField() {
+            const container = document.getElementById('accounts-container');
+            const div = document.createElement('div');
+            div.className = 'border border-gray-200 rounded-lg p-4 bg-white/60 mt-4';
+            div.innerHTML = `
+                <div class="flex justify-between items-center mb-3">
+                    <h4 class="font-medium">账号信息</h4>
+                    <button type="button" class="text-apple-red hover:text-red-600 delete-account-btn">
+                        <i class="fa fa-trash"></i>
+                    </button>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">账号名称</label>
+                        <input type="text" class="input-apple account-name" placeholder="例如：管理员" required>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">账号</label>
+                        <input type="text" class="input-apple account-username" placeholder="请输入账号" required>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">密码</label>
+                        <div class="relative">
+                            <input type="password" class="input-apple account-password" placeholder="请输入密码" required>
+                            <button type="button" class="absolute right-3 top-1/2 transform -translate-y-1/2 text-apple-gray toggle-password">
+                                <i class="fa fa-eye-slash"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            container.appendChild(div);
+        }
+
+        // 加载网站详情
+        function loadWebsiteDetails(id) {
+            const website = data.websites.find(w => w.id === id);
+            if (!website) return;
+            
+            const cat = data.categories.find(c => c.id === website.categoryId) || { name: '未知' };
+            const modal = document.getElementById('view-details-modal');
+            
+            document.getElementById('details-title').textContent = website.name;
+            document.getElementById('details-name').textContent = website.name;
+            document.getElementById('details-category').textContent = cat.name;
+            document.getElementById('details-url').textContent = website.url;
+            document.getElementById('details-description').textContent = website.description || '无描述';
+            document.getElementById('edit-website-btn').dataset.id = id;
+            
+            const accContainer = document.getElementById('details-accounts');
+            accContainer.innerHTML = '';
+            
+            website.accounts.forEach(acc => {
+                const div = document.createElement('div');
+                div.className = 'border border-gray-200 rounded-lg p-4 bg-white/60';
+                div.innerHTML = `
+                    <div class="flex justify-between items-center mb-3">
+                        <h4 class="font-medium">${acc.name || '账号信息'}</h4>
+                    </div>
+                    <div class="space-y-2">
+                        <div class="flex items-center justify-between p-2 bg-white/50 rounded-lg">
+                            <div class="flex items-center">
+                                <i class="fa fa-user-circle text-apple-gray mr-2"></i>
+                                <span class="font-medium">账号</span>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <span class="text-sm">${acc.username}</span>
+                                <i class="fa fa-clipboard text-apple-gray copy-btn" data-value="${acc.username}" data-type="username"></i>
+                            </div>
+                        </div>
+                        <div class="flex items-center justify-between p-2 bg-white/50 rounded-lg">
+                            <div class="flex items-center">
+                                <i class="fa fa-key text-apple-gray mr-2"></i>
+                                <span class="font-medium">密码</span>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <span class="text-sm">••••••••</span>
+                                <i class="fa fa-clipboard text-apple-gray copy-btn" data-value="${acc.password}" data-type="password"></i>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                accContainer.appendChild(div);
+            });
+            
+            modal.classList.remove('hidden');
+        }
+
+        // 加载网站编辑表单
+        function loadWebsiteForm(id) {
+            const website = data.websites.find(w => w.id === id);
+            if (!website) return;
+            
+            document.getElementById('website-id').value = id;
+            document.getElementById('website-name').value = website.name;
+            document.getElementById('website-category').value = website.categoryId;
+            document.getElementById('website-url').value = website.url;
+            document.getElementById('website-description').value = website.description || '';
+            
+            const container = document.getElementById('accounts-container');
+            container.innerHTML = '';
+            
+            website.accounts.forEach(acc => {
+                const div = document.createElement('div');
+                div.className = 'border border-gray-200 rounded-lg p-4 bg-white/60 mt-4';
+                div.innerHTML = `
+                    <div class="flex justify-between items-center mb-3">
+                        <h4 class="font-medium">账号信息</h4>
+                        <button type="button" class="text-apple-red hover:text-red-600 delete-account-btn">
+                            <i class="fa fa-trash"></i>
+                        </button>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">账号名称</label>
+                            <input type="text" class="input-apple account-name" value="${acc.name || ''}" required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">账号</label>
+                            <input type="text" class="input-apple account-username" value="${acc.username || ''}" required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">密码</label>
+                            <div class="relative">
+                                <input type="password" class="input-apple account-password" value="${acc.password || ''}" required>
+                                <button type="button" class="absolute right-3 top-1/2 transform -translate-y-1/2 text-apple-gray toggle-password">
+                                    <i class="fa fa-eye-slash"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        // 拖拽辅助函数
+        function getDragAfterElement(container, y) {
+            const draggables = [...container.querySelectorAll('.website-card:not(.dragging)')];
+            
+            return draggables.reduce((closest, child) => {
+                const box = child.getBoundingClientRect();
+                const offset = y - box.top - box.height / 2;
+                return offset < 0 && offset > closest.offset ? { offset, element: child } : closest;
+            }, { offset: Number.NEGATIVE_INFINITY }).element;
+        }
+
+        // 更新网站顺序
+        function updateWebsiteOrder() {
+            const ids = [...document.getElementById('websites-grid').querySelectorAll('.website-card')].map(card => card.dataset.id);
+            data.websites.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
+            saveData();
+        }
+
+        // 显示复制提示
+        function showCopyToast(message) {
+            const toast = document.getElementById('copy-toast');
+            document.getElementById('copy-message').textContent = message;
+            toast.classList.remove('translate-y-16', 'opacity-0');
+            toast.classList.add('translate-y-0', 'opacity-100');
+            setTimeout(() => {
+                toast.classList.remove('translate-y-0', 'opacity-100');
+                toast.classList.add('translate-y-16', 'opacity-0');
+            }, 2000);
+        }
+
+        // 页面加载完成后初始化
+        window.addEventListener('DOMContentLoaded', init);
+    </script>
     <script>
         tailwind.config = {
             theme: {
@@ -24,10 +700,7 @@
                     fontFamily: {
                         sans: ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif'],
                     },
-                    backdropBlur: {
-                        'xs': '2px',
-                    }
-                },
+                }
             }
         }
     </script>
@@ -144,13 +817,7 @@
                         网站分类
                     </h2>
                     <div id="categories-list" class="space-y-2">
-                        <div class="category-item flex items-center justify-between p-2 rounded-lg hover:bg-white/50 cursor-pointer transition-all" data-id="all">
-                            <div class="flex items-center">
-                                <i class="fa fa-folder-open mr-2"></i>
-                                <span>全部网站</span>
-                            </div>
-                            <span class="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full" id="all-count">0</span>
-                        </div>
+                        <!-- 分类将动态生成 -->
                     </div>
                 </div>
             </aside>
@@ -166,7 +833,7 @@
                 </div>
 
                 <div id="websites-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 hidden">
-                    <!-- 网站卡片将通过JavaScript动态添加 -->
+                    <!-- 网站卡片将动态生成 -->
                 </div>
             </main>
         </div>
@@ -214,7 +881,7 @@
                         <label for="website-category" class="block text-sm font-medium text-gray-700 mb-1">所属分类</label>
                         <select id="website-category" class="input-apple" required>
                             <option value="">请选择分类</option>
-                            <!-- 分类选项将通过JavaScript动态添加 -->
+                            <!-- 分类选项将动态生成 -->
                         </select>
                     </div>
                     <div class="md:col-span-2">
@@ -228,33 +895,7 @@
                 </div>
 
                 <div class="space-y-4" id="accounts-container">
-                    <div class="border border-gray-200 rounded-lg p-4 bg-white/60">
-                        <div class="flex justify-between items-center mb-3">
-                            <h4 class="font-medium">账号信息</h4>
-                            <button type="button" class="text-apple-red hover:text-red-600 delete-account-btn">
-                                <i class="fa fa-trash"></i>
-                            </button>
-                        </div>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">账号名称</label>
-                                <input type="text" class="input-apple account-name" placeholder="例如：管理员" required>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">账号</label>
-                                <input type="text" class="input-apple account-username" placeholder="请输入账号" required>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">密码</label>
-                                <div class="relative">
-                                    <input type="password" class="input-apple account-password" placeholder="请输入密码" required>
-                                    <button type="button" class="absolute right-3 top-1/2 transform -translate-y-1/2 text-apple-gray toggle-password">
-                                        <i class="fa fa-eye-slash"></i>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                    <!-- 账号信息将动态生成 -->
                 </div>
 
                 <button type="button" id="add-account-btn" class="btn-apple-secondary flex items-center w-full justify-center">
@@ -305,7 +946,7 @@
                 </div>
 
                 <div id="details-accounts" class="space-y-4">
-                    <!-- 账号信息将通过JavaScript动态添加 -->
+                    <!-- 账号信息将动态生成 -->
                 </div>
             </div>
         </div>
@@ -316,706 +957,5 @@
         <i class="fa fa-check-circle mr-2"></i>
         <span id="copy-message">已复制到剪贴板</span>
     </div>
-
-    <script>
-        // 数据模型
-        const data = {
-            categories: [
-                { id: 'uncategorized', name: '未分类' }
-            ],
-            websites: [],
-            nextWebsiteId: 1,
-            nextCategoryId: 2,
-            verificationCode: '329650317'
-        };
-
-        // DOM 元素
-        const loginPage = document.getElementById('login-page');
-        const app = document.getElementById('app');
-        const loginForm = document.getElementById('login-form');
-        const verificationCodeInput = document.getElementById('verification-code');
-        const verificationError = document.getElementById('verification-error');
-        const logoutBtn = document.getElementById('logout-btn');
-        const addCategoryBtn = document.getElementById('add-category-btn');
-        const addCategoryModal = document.getElementById('add-category-modal');
-        const closeCategoryModal = document.getElementById('close-category-modal');
-        const cancelAddCategory = document.getElementById('cancel-add-category');
-        const addCategoryForm = document.getElementById('add-category-form');
-        const categoryNameInput = document.getElementById('category-name');
-        const addWebsiteBtn = document.getElementById('add-website-btn');
-        const websiteModal = document.getElementById('website-modal');
-        const closeWebsiteModal = document.getElementById('close-website-modal');
-        const cancelWebsite = document.getElementById('cancel-website');
-        const websiteForm = document.getElementById('website-form');
-        const websiteIdInput = document.getElementById('website-id');
-        const websiteNameInput = document.getElementById('website-name');
-        const websiteCategoryInput = document.getElementById('website-category');
-        const websiteUrlInput = document.getElementById('website-url');
-        const websiteDescriptionInput = document.getElementById('website-description');
-        const accountsContainer = document.getElementById('accounts-container');
-        const addAccountBtn = document.getElementById('add-account-btn');
-        const websitesGrid = document.getElementById('websites-grid');
-        const emptyState = document.getElementById('empty-state');
-        const allCountBadge = document.getElementById('all-count');
-        const viewDetailsModal = document.getElementById('view-details-modal');
-        const closeDetailsModal = document.getElementById('close-details-modal');
-        const editWebsiteBtn = document.getElementById('edit-website-btn');
-        const detailsTitle = document.getElementById('details-title');
-        const detailsName = document.getElementById('details-name');
-        const detailsCategory = document.getElementById('details-category');
-        const detailsUrl = document.getElementById('details-url');
-        const detailsDescription = document.getElementById('details-description');
-        const detailsAccounts = document.getElementById('details-accounts');
-        const copyToast = document.getElementById('copy-toast');
-        const copyMessage = document.getElementById('copy-message');
-        const categoriesList = document.getElementById('categories-list');
-
-        // 初始化
-        function init() {
-            // 从localStorage加载数据
-            loadData();
-            
-            // 渲染分类列表
-            renderCategories();
-            
-            // 渲染网站列表
-            renderWebsites();
-            
-            // 初始化事件监听
-            initEventListeners();
-        }
-
-        // 加载数据
-        function loadData() {
-            const savedData = localStorage.getItem('passwordManagerData');
-            if (savedData) {
-                try {
-                    const parsedData = JSON.parse(savedData);
-                    Object.assign(data, parsedData);
-                } catch (e) {
-                    console.error('Failed to parse saved data:', e);
-                }
-            }
-        }
-
-        // 保存数据
-        function saveData() {
-            localStorage.setItem('passwordManagerData', JSON.stringify(data));
-        }
-
-        // 初始化事件监听
-        function initEventListeners() {
-            // 登录表单提交
-            loginForm.addEventListener('submit', function(e) {
-                e.preventDefault();
-                if (verificationCodeInput.value === data.verificationCode) {
-                    loginPage.classList.add('hidden');
-                    app.classList.remove('hidden');
-                    verificationError.classList.add('hidden');
-                    verificationCodeInput.value = '';
-                } else {
-                    verificationError.classList.remove('hidden');
-                    verificationCodeInput.focus();
-                }
-            });
-
-            // 登出按钮
-            logoutBtn.addEventListener('click', function() {
-                app.classList.add('hidden');
-                loginPage.classList.remove('hidden');
-            });
-
-            // 添加分类按钮
-            addCategoryBtn.addEventListener('click', function() {
-                categoryNameInput.value = '';
-                addCategoryModal.classList.remove('hidden');
-                categoryNameInput.focus();
-            });
-
-            // 关闭添加分类模态框
-            closeCategoryModal.addEventListener('click', function() {
-                addCategoryModal.classList.add('hidden');
-            });
-
-            // 取消添加分类
-            cancelAddCategory.addEventListener('click', function() {
-                addCategoryModal.classList.add('hidden');
-            });
-
-            // 添加分类表单提交
-            addCategoryForm.addEventListener('submit', function(e) {
-                e.preventDefault();
-                const name = categoryNameInput.value.trim();
-                if (name) {
-                    const newCategory = {
-                        id: 'category_' + data.nextCategoryId++,
-                        name: name
-                    };
-                    data.categories.push(newCategory);
-                    saveData();
-                    renderCategories();
-                    addCategoryModal.classList.add('hidden');
-                }
-            });
-
-            // 添加网站按钮
-            addWebsiteBtn.addEventListener('click', function() {
-                resetWebsiteForm();
-                websiteModal.classList.remove('hidden');
-                websiteNameInput.focus();
-            });
-
-            // 关闭网站模态框
-            closeWebsiteModal.addEventListener('click', function() {
-                websiteModal.classList.add('hidden');
-            });
-
-            // 取消添加网站
-            cancelWebsite.addEventListener('click', function() {
-                websiteModal.classList.add('hidden');
-            });
-
-            // 添加账号按钮
-            addAccountBtn.addEventListener('click', function() {
-                addAccountField();
-            });
-
-            // 网站表单提交
-            websiteForm.addEventListener('submit', function(e) {
-                e.preventDefault();
-                const websiteId = websiteIdInput.value;
-                const name = websiteNameInput.value.trim();
-                const categoryId = websiteCategoryInput.value;
-                const url = websiteUrlInput.value.trim();
-                const description = websiteDescriptionInput.value.trim();
-                
-                const accountElements = accountsContainer.querySelectorAll('.account-name');
-                const accounts = [];
-                
-                accountElements.forEach((accountNameEl, index) => {
-                    const usernameEl = accountNameEl.parentElement.parentElement.querySelector('.account-username');
-                    const passwordEl = accountNameEl.parentElement.parentElement.querySelector('.account-password');
-                    
-                    if (usernameEl.value.trim() && passwordEl.value.trim()) {
-                        accounts.push({
-                            name: accountNameEl.value.trim(),
-                            username: usernameEl.value.trim(),
-                            password: passwordEl.value.trim()
-                        });
-                    }
-                });
-                
-                if (name && categoryId && url && accounts.length > 0) {
-                    if (websiteId) {
-                        // 更新现有网站
-                        const websiteIndex = data.websites.findIndex(w => w.id === websiteId);
-                        if (websiteIndex !== -1) {
-                            data.websites[websiteIndex] = {
-                                ...data.websites[websiteIndex],
-                                name,
-                                categoryId,
-                                url,
-                                description,
-                                accounts
-                            };
-                        }
-                    } else {
-                        // 添加新网站
-                        const newWebsite = {
-                            id: 'website_' + data.nextWebsiteId++,
-                            name,
-                            categoryId,
-                            url,
-                            description,
-                            accounts
-                        };
-                        data.websites.push(newWebsite);
-                    }
-                    
-                    saveData();
-                    renderWebsites();
-                    websiteModal.classList.add('hidden');
-                }
-            });
-
-            // 关闭详情模态框
-            closeDetailsModal.addEventListener('click', function() {
-                viewDetailsModal.classList.add('hidden');
-            });
-
-            // 编辑网站按钮
-            editWebsiteBtn.addEventListener('click', function() {
-                const websiteId = editWebsiteBtn.dataset.id;
-                if (websiteId) {
-                    viewDetailsModal.classList.add('hidden');
-                    loadWebsiteForm(websiteId);
-                    websiteModal.classList.remove('hidden');
-                }
-            });
-
-            // 点击复制事件委托
-            document.addEventListener('click', function(e) {
-                if (e.target.classList.contains('copy-btn')) {
-                    const textToCopy = e.target.dataset.value;
-                    const type = e.target.dataset.type;
-                    
-                    navigator.clipboard.writeText(textToCopy).then(function() {
-                        showCopyToast(type === 'username' ? '账号已复制' : '密码已复制');
-                    }).catch(function(err) {
-                        console.error('复制失败: ', err);
-                        showCopyToast('复制失败，请手动复制');
-                    });
-                } else if (e.target.id === 'details-url') {
-                    const url = e.target.textContent;
-                    window.open(url, '_blank');
-                }
-            });
-
-            // 切换密码可见性
-            document.addEventListener('click', function(e) {
-                if (e.target.classList.contains('toggle-password')) {
-                    const passwordInput = e.target.parentElement.querySelector('input');
-                    const icon = e.target.querySelector('i');
-                    
-                    if (passwordInput.type === 'password') {
-                        passwordInput.type = 'text';
-                        icon.classList.remove('fa-eye-slash');
-                        icon.classList.add('fa-eye');
-                    } else {
-                        passwordInput.type = 'password';
-                        icon.classList.remove('fa-eye');
-                        icon.classList.add('fa-eye-slash');
-                    }
-                }
-            });
-
-            // 分类筛选
-            document.addEventListener('click', function(e) {
-                if (e.target.closest('.category-item')) {
-                    const categoryItem = e.target.closest('.category-item');
-                    const categoryId = categoryItem.dataset.id;
-                    
-                    // 移除所有分类的活动状态
-                    document.querySelectorAll('.category-item').forEach(item => {
-                        item.classList.remove('bg-white/70');
-                        item.classList.add('hover:bg-white/50');
-                    });
-                    
-                    // 添加当前分类的活动状态
-                    categoryItem.classList.add('bg-white/70');
-                    categoryItem.classList.remove('hover:bg-white/50');
-                    
-                    // 筛选并渲染网站
-                    renderWebsites(categoryId);
-                }
-            });
-
-            // 拖拽排序
-            let draggedItem = null;
-            
-            websitesGrid.addEventListener('dragstart', function(e) {
-                if (e.target.closest('.website-card')) {
-                    draggedItem = e.target.closest('.website-card');
-                    setTimeout(() => {
-                        draggedItem.classList.add('dragging');
-                    }, 0);
-                }
-            });
-            
-            websitesGrid.addEventListener('dragend', function() {
-                draggedItem.classList.remove('dragging');
-                draggedItem = null;
-                
-                // 更新排序
-                updateWebsiteOrder();
-            });
-            
-            websitesGrid.addEventListener('dragover', function(e) {
-                e.preventDefault();
-                const afterElement = getDragAfterElement(websitesGrid, e.clientY);
-                const card = e.target.closest('.website-card');
-                
-                if (afterElement) {
-                    websitesGrid.insertBefore(draggedItem, afterElement);
-                } else {
-                    websitesGrid.appendChild(draggedItem);
-                }
-            });
-            
-            websitesGrid.addEventListener('dragenter', function(e) {
-                e.preventDefault();
-            });
-            
-            websitesGrid.addEventListener('drop', function(e) {
-                e.preventDefault();
-            });
-        }
-
-        // 获取拖拽后的元素
-        function getDragAfterElement(container, y) {
-            const draggableElements = [...container.querySelectorAll('.website-card:not(.dragging)')];
-            
-            return draggableElements.reduce((closest, child) => {
-                const box = child.getBoundingClientRect();
-                const offset = y - box.top - box.height / 2;
-                
-                if (offset < 0 && offset > closest.offset) {
-                    return { offset: offset, element: child };
-                } else {
-                    return closest;
-                }
-            }, { offset: Number.NEGATIVE_INFINITY }).element;
-        }
-
-        // 更新网站顺序
-        function updateWebsiteOrder() {
-            const websiteCards = websitesGrid.querySelectorAll('.website-card');
-            const newOrder = [];
-            
-            websiteCards.forEach(card => {
-                newOrder.push(card.dataset.id);
-            });
-            
-            // 重新排序数据
-            data.websites.sort((a, b) => {
-                const indexA = newOrder.indexOf(a.id);
-                const indexB = newOrder.indexOf(b.id);
-                
-                return indexA - indexB;
-            });
-            
-            saveData();
-        }
-
-        // 渲染分类列表
-        function renderCategories() {
-            categoriesList.innerHTML = '';
-            
-            // 添加"全部网站"分类
-            const allCategory = document.createElement('div');
-            allCategory.className = 'category-item flex items-center justify-between p-2 rounded-lg bg-white/70 cursor-pointer transition-all';
-            allCategory.dataset.id = 'all';
-            allCategory.innerHTML = `
-                <div class="flex items-center">
-                    <i class="fa fa-folder-open mr-2"></i>
-                    <span>全部网站</span>
-                </div>
-                <span class="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full" id="all-count">${data.websites.length}</span>
-            `;
-            categoriesList.appendChild(allCategory);
-            
-            // 添加其他分类
-            data.categories.forEach(category => {
-                const categoryItem = document.createElement('div');
-                const websiteCount = data.websites.filter(w => w.categoryId === category.id).length;
-                
-                categoryItem.className = 'category-item flex items-center justify-between p-2 rounded-lg hover:bg-white/50 cursor-pointer transition-all';
-                categoryItem.dataset.id = category.id;
-                categoryItem.innerHTML = `
-                    <div class="flex items-center">
-                        <i class="fa fa-folder mr-2"></i>
-                        <span>${category.name}</span>
-                    </div>
-                    <span class="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">${websiteCount}</span>
-                `;
-                categoriesList.appendChild(categoryItem);
-            });
-            
-            // 更新分类选择器
-            websiteCategoryInput.innerHTML = '<option value="">请选择分类</option>';
-            data.categories.forEach(category => {
-                const option = document.createElement('option');
-                option.value = category.id;
-                option.textContent = category.name;
-                websiteCategoryInput.appendChild(option);
-            });
-        }
-
-        // 渲染网站列表
-        function renderWebsites(categoryId = 'all') {
-            let websitesToRender = data.websites;
-            
-            if (categoryId !== 'all') {
-                websitesToRender = data.websites.filter(website => website.categoryId === categoryId);
-            }
-            
-            websitesGrid.innerHTML = '';
-            
-            if (websitesToRender.length === 0) {
-                websitesGrid.classList.add('hidden');
-                emptyState.classList.remove('hidden');
-                return;
-            }
-            
-            websitesGrid.classList.remove('hidden');
-            emptyState.classList.add('hidden');
-            
-            websitesToRender.forEach(website => {
-                const category = data.categories.find(c => c.id === website.categoryId) || { name: '未知分类' };
-                const firstAccount = website.accounts[0] || { username: '无账号', password: '无密码' };
-                
-                const card = document.createElement('div');
-                card.className = 'website-card glass-effect rounded-xl overflow-hidden card-hover cursor-pointer';
-                card.dataset.id = website.id;
-                card.draggable = true;
-                
-                card.innerHTML = `
-                    <div class="p-4">
-                        <div class="flex justify-between items-start mb-3">
-                            <h3 class="font-semibold text-lg truncate">${website.name}</h3>
-                            <span class="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">${category.name}</span>
-                        </div>
-                        <div class="text-sm text-apple-gray mb-3 line-clamp-2">${website.description || '无描述信息'}</div>
-                        <div class="text-sm text-apple-blue mb-4 hover:underline cursor-pointer truncate">${website.url}</div>
-                        <div class="space-y-2">
-                            <div class="flex items-center justify-between p-2 bg-white/50 rounded-lg">
-                                <div class="flex items-center">
-                                    <i class="fa fa-user-circle text-apple-gray mr-2"></i>
-                                    <span class="font-medium">${firstAccount.name || '主账号'}</span>
-                                </div>
-                                <div class="flex items-center space-x-2">
-                                    <div class="copy-btn relative group" data-value="${firstAccount.username}" data-type="username">
-                                        <span class="text-sm font-medium hover:text-primary">${firstAccount.username}</span>
-                                        <span class="absolute -bottom-8 left-1/2 transform -translate-x-1/2 bg-dark text-white text-xs px-2 py-1 rounded opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all w-max">点击复制</span>
-                                    </div>
-                                    <i class="fa fa-clipboard text-apple-gray cursor-pointer copy-btn" data-value="${firstAccount.username}" data-type="username"></i>
-                                </div>
-                            </div>
-                            <div class="flex items-center justify-between p-2 bg-white/50 rounded-lg">
-                                <div class="flex items-center">
-                                    <i class="fa fa-key text-apple-gray mr-2"></i>
-                                    <span class="font-medium">密码</span>
-                                </div>
-                                <div class="flex items-center space-x-2">
-                                    <div class="copy-btn relative group" data-value="${firstAccount.password}" data-type="password">
-                                        <span class="text-sm font-medium hover:text-primary">••••••••</span>
-                                        <span class="absolute -bottom-8 left-1/2 transform -translate-x-1/2 bg-dark text-white text-xs px-2 py-1 rounded opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all w-max">点击复制</span>
-                                    </div>
-                                    <i class="fa fa-clipboard text-apple-gray cursor-pointer copy-btn" data-value="${firstAccount.password}" data-type="password"></i>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="mt-4 flex justify-end">
-                            <button class="view-details-btn text-sm text-apple-blue hover:text-blue-700 flex items-center">
-                                <span>查看详情</span>
-                                <i class="fa fa-angle-right ml-1"></i>
-                            </button>
-                        </div>
-                    </div>
-                `;
-                
-                websitesGrid.appendChild(card);
-                
-                // 添加查看详情事件
-                card.querySelector('.view-details-btn').addEventListener('click', function() {
-                    loadWebsiteDetails(website.id);
-                });
-            });
-        }
-
-        // 重置网站表单
-        function resetWebsiteForm() {
-            websiteIdInput.value = '';
-            websiteNameInput.value = '';
-            websiteCategoryInput.value = '';
-            websiteUrlInput.value = '';
-            websiteDescriptionInput.value = '';
-            
-            accountsContainer.innerHTML = '';
-            addAccountField();
-        }
-
-        // 添加账号字段
-        function addAccountField() {
-            const accountFields = document.createElement('div');
-            accountFields.className = 'border border-gray-200 rounded-lg p-4 bg-white/60 mt-4';
-            accountFields.innerHTML = `
-                <div class="flex justify-between items-center mb-3">
-                    <h4 class="font-medium">账号信息</h4>
-                    <button type="button" class="text-apple-red hover:text-red-600 delete-account-btn">
-                        <i class="fa fa-trash"></i>
-                    </button>
-                </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">账号名称</label>
-                        <input type="text" class="input-apple account-name" placeholder="例如：管理员" required>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">账号</label>
-                        <input type="text" class="input-apple account-username" placeholder="请输入账号" required>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">密码</label>
-                        <div class="relative">
-                            <input type="password" class="input-apple account-password" placeholder="请输入密码" required>
-                            <button type="button" class="absolute right-3 top-1/2 transform -translate-y-1/2 text-apple-gray toggle-password">
-                                <i class="fa fa-eye-slash"></i>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            `;
-            
-            accountsContainer.appendChild(accountFields);
-            
-            // 添加删除账号事件
-            accountFields.querySelector('.delete-account-btn').addEventListener('click', function() {
-                if (accountsContainer.children.length > 1) {
-                    accountFields.remove();
-                } else {
-                    // 如果是最后一个账号，清空输入但不删除
-                    accountFields.querySelectorAll('input').forEach(input => {
-                        input.value = '';
-                    });
-                }
-            });
-            
-            // 聚焦到新添加的账号名称输入框
-            accountFields.querySelector('.account-name').focus();
-        }
-
-        // 加载网站表单数据
-        function loadWebsiteForm(websiteId) {
-            const website = data.websites.find(w => w.id === websiteId);
-            if (!website) return;
-            
-            websiteIdInput.value = website.id;
-            websiteNameInput.value = website.name;
-            websiteCategoryInput.value = website.categoryId;
-            websiteUrlInput.value = website.url;
-            websiteDescriptionInput.value = website.description || '';
-            
-            accountsContainer.innerHTML = '';
-            
-            if (website.accounts && website.accounts.length > 0) {
-                website.accounts.forEach(account => {
-                    const accountFields = document.createElement('div');
-                    accountFields.className = 'border border-gray-200 rounded-lg p-4 bg-white/60 mt-4';
-                    accountFields.innerHTML = `
-                        <div class="flex justify-between items-center mb-3">
-                            <h4 class="font-medium">账号信息</h4>
-                            <button type="button" class="text-apple-red hover:text-red-600 delete-account-btn">
-                                <i class="fa fa-trash"></i>
-                            </button>
-                        </div>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">账号名称</label>
-                                <input type="text" class="input-apple account-name" placeholder="例如：管理员" value="${account.name || ''}" required>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">账号</label>
-                                <input type="text" class="input-apple account-username" placeholder="请输入账号" value="${account.username || ''}" required>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">密码</label>
-                                <div class="relative">
-                                    <input type="password" class="input-apple account-password" placeholder="请输入密码" value="${account.password || ''}" required>
-                                    <button type="button" class="absolute right-3 top-1/2 transform -translate-y-1/2 text-apple-gray toggle-password">
-                                        <i class="fa fa-eye-slash"></i>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                    
-                    accountsContainer.appendChild(accountFields);
-                    
-                    // 添加删除账号事件
-                    accountFields.querySelector('.delete-account-btn').addEventListener('click', function() {
-                        if (accountsContainer.children.length > 1) {
-                            accountFields.remove();
-                        } else {
-                            // 如果是最后一个账号，清空输入但不删除
-                            accountFields.querySelectorAll('input').forEach(input => {
-                                input.value = '';
-                            });
-                        }
-                    });
-                });
-            } else {
-                addAccountField();
-            }
-        }
-
-        // 加载网站详情
-        function loadWebsiteDetails(websiteId) {
-            const website = data.websites.find(w => w.id === websiteId);
-            if (!website) return;
-            
-            const category = data.categories.find(c => c.id === website.categoryId) || { name: '未知分类' };
-            
-            detailsTitle.textContent = website.name;
-            detailsName.textContent = website.name;
-            detailsCategory.textContent = category.name;
-            detailsUrl.textContent = website.url;
-            detailsDescription.textContent = website.description || '无描述信息';
-            detailsAccounts.innerHTML = '';
-            
-            editWebsiteBtn.dataset.id = website.id;
-            
-            if (website.accounts && website.accounts.length > 0) {
-                website.accounts.forEach(account => {
-                    const accountDetails = document.createElement('div');
-                    accountDetails.className = 'border border-gray-200 rounded-lg p-4 bg-white/60';
-                    accountDetails.innerHTML = `
-                        <div class="flex justify-between items-center mb-3">
-                            <h4 class="font-medium">${account.name || '账号信息'}</h4>
-                        </div>
-                        <div class="space-y-2">
-                            <div class="flex items-center justify-between p-2 bg-white/50 rounded-lg">
-                                <div class="flex items-center">
-                                    <i class="fa fa-user-circle text-apple-gray mr-2"></i>
-                                    <span class="font-medium">账号</span>
-                                </div>
-                                <div class="flex items-center space-x-2">
-                                    <span class="text-sm font-medium">${account.username}</span>
-                                    <i class="fa fa-clipboard text-apple-gray cursor-pointer copy-btn" data-value="${account.username}" data-type="username"></i>
-                                </div>
-                            </div>
-                            <div class="flex items-center justify-between p-2 bg-white/50 rounded-lg">
-                                <div class="flex items-center">
-                                    <i class="fa fa-key text-apple-gray mr-2"></i>
-                                    <span class="font-medium">密码</span>
-                                </div>
-                                <div class="flex items-center space-x-2">
-                                    <span class="text-sm font-medium">••••••••</span>
-                                    <i class="fa fa-clipboard text-apple-gray cursor-pointer copy-btn" data-value="${account.password}" data-type="password"></i>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                    
-                    detailsAccounts.appendChild(accountDetails);
-                });
-            } else {
-                detailsAccounts.innerHTML = `
-                    <div class="text-center py-6 text-apple-gray">
-                        <i class="fa fa-info-circle mr-2"></i>
-                        没有账号信息
-                    </div>
-                `;
-            }
-            
-            viewDetailsModal.classList.remove('hidden');
-        }
-
-        // 显示复制提示
-        function showCopyToast(message) {
-            copyMessage.textContent = message;
-            copyToast.classList.remove('translate-y-16', 'opacity-0');
-            copyToast.classList.add('translate-y-0', 'opacity-100');
-            
-            setTimeout(() => {
-                copyToast.classList.remove('translate-y-0', 'opacity-100');
-                copyToast.classList.add('translate-y-16', 'opacity-0');
-            }, 2000);
-        }
-
-        // 初始化应用
-        init();
-    </script>
 </body>
 </html>
-    
