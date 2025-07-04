@@ -3,32 +3,337 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>密码管理器</title>
+    <title>桓健密码管理器</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
-    <!-- 引入Firebase模块化SDK -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
-        import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js";
-        import { getAnalytics } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-analytics.js";
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#0071e3',
+                        secondary: '#f5f5f7',
+                        dark: '#1d1d1f',
+                        'apple-gray': '#86868b',
+                        'apple-light-gray': '#fbfbfd',
+                        'apple-blue': '#0071e3',
+                        'apple-green': '#34c759',
+                        'apple-red': '#ff3b30',
+                        'apple-yellow': '#ffcc00',
+                    },
+                    fontFamily: {
+                        sans: ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .content-auto {
+                content-visibility: auto;
+            }
+            .backdrop-blur-apple {
+                backdrop-filter: blur(20px);
+                -webkit-backdrop-filter: blur(20px);
+            }
+            .glass-effect {
+                background: rgba(255, 255, 255, 0.7);
+                backdrop-filter: blur(20px);
+                -webkit-backdrop-filter: blur(20px);
+                border: 1px solid rgba(255, 255, 255, 0.18);
+            }
+            .glass-effect-dark {
+                background: rgba(29, 29, 31, 0.7);
+                backdrop-filter: blur(20px);
+                -webkit-backdrop-filter: blur(20px);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+            }
+            .card-hover {
+                transition: all 0.3s ease;
+            }
+            .card-hover:hover {
+                transform: translateY(-5px);
+                box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            }
+            .dragging {
+                opacity: 0.5;
+                transform: scale(1.02);
+                box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+                cursor: grabbing;
+            }
+            .btn-apple {
+                @apply px-4 py-2 rounded-full transition-all duration-300 font-medium;
+            }
+            .btn-apple-primary {
+                @apply btn-apple bg-primary text-white hover:bg-primary/90 active:bg-primary/80;
+            }
+            .btn-apple-secondary {
+                @apply btn-apple bg-white/80 text-dark hover:bg-white active:bg-gray-100 border border-gray-200;
+            }
+            .input-apple {
+                @apply w-full px-4 py-2 rounded-lg bg-white/80 border border-gray-200 focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all;
+            }
+        }
+    </style>
+</head>
+<body class="bg-secondary min-h-screen font-sans text-dark antialiased">
+    <!-- 登录页面 -->
+    <div id="login-page" class="fixed inset-0 flex items-center justify-center z-50">
+        <div class="form-apple max-w-md w-full mx-4 shadow-xl">
+            <div class="text-center mb-6">
+                <div class="w-16 h-16 mx-auto bg-primary rounded-full flex items-center justify-center mb-4">
+                    <i class="fa fa-lock text-white text-2xl"></i>
+                </div>
+                <h2 class="text-[clamp(1.5rem,3vw,2rem)] font-semibold">桓健密码管理器</h2>
+                <p class="text-apple-gray mt-2">请输入访问验证码</p>
+            </div>
+            <form id="login-form" class="space-y-4">
+                <div>
+                    <label for="verification-code" class="block text-sm font-medium text-gray-700 mb-1">验证码</label>
+                    <input type="text" id="verification-code" class="input-apple" placeholder="请输入9位验证码" maxlength="9" pattern="[0-9]{9}" required>
+                    <p id="verification-error" class="text-apple-red text-sm mt-1 hidden">验证码错误，请重新输入</p>
+                </div>
+                <button type="submit" class="btn-apple-primary w-full">
+                    验证并进入
+                </button>
+            </form>
+        </div>
+    </div>
 
-        // 初始化Firebase
-        const firebaseConfig = {
-            apiKey: "AIzaSyBeHC5dGcUyNQRUOW-zmifmDqY37G9f22c",
-            authDomain: "password-manager-4d734.firebaseapp.com",
-            projectId: "password-manager-4d734",
-            storageBucket: "password-manager-4d734.firebasestorage.app",
-            messagingSenderId: "901744164367",
-            appId: "1:901744164367:web:6d840fe4a7a991fd8eed7a",
-            measurementId: "G-JH42TB8H78"
-        };
+    <!-- 主应用 -->
+    <div id="app" class="hidden">
+        <!-- 顶部导航 -->
+        <header class="sticky top-0 z-40 glass-effect">
+            <div class="container mx-auto px-4 py-3 flex flex-col md:flex-row items-center justify-between gap-3">
+                <div class="flex items-center space-x-2">
+                    <div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
+                        <i class="fa fa-lock text-white text-sm"></i>
+                    </div>
+                    <h1 class="text-xl font-semibold">桓健密码管理器</h1>
+                </div>
+                
+                <div class="w-full md:w-auto flex items-center space-x-3">
+                    <!-- 搜索框 -->
+                    <div class="relative flex-1 md:flex-none md:w-64">
+                        <input type="text" id="search-input" 
+                               class="input-apple pl-10 pr-4 py-2 w-full" 
+                               placeholder="搜索网站名称...">
+                        <i class="fa fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-apple-gray"></i>
+                    </div>
+                    
+                    <div class="flex items-center space-x-3">
+                        <button id="import-btn" class="btn-apple-secondary flex items-center">
+                            <i class="fa fa-upload mr-2"></i>
+                            <span class="hidden sm:inline">导入</span>
+                        </button>
+                        <button id="export-btn" class="btn-apple-secondary flex items-center">
+                            <i class="fa fa-download mr-2"></i>
+                            <span class="hidden sm:inline">导出</span>
+                        </button>
+                        <button id="add-category-btn" class="btn-apple-secondary flex items-center">
+                            <i class="fa fa-folder-plus mr-2"></i>
+                            <span class="hidden sm:inline">添加分类</span>
+                        </button>
+                        <button id="add-website-btn" class="btn-apple-primary flex items-center">
+                            <i class="fa fa-plus mr-2"></i>
+                            <span class="hidden sm:inline">添加网站</span>
+                        </button>
+                        <button id="logout-btn" class="btn-apple-secondary flex items-center">
+                            <i class="fa fa-sign-out mr-2"></i>
+                            <span class="hidden sm:inline">退出</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </header>
 
-        const app = initializeApp(firebaseConfig);
-        const analytics = getAnalytics(app);
-        const auth = getAuth(app);
-        const db = getDatabase(app);
+        <div class="container mx-auto px-4 py-6 flex flex-col md:flex-row gap-6">
+            <!-- 左侧分类栏 -->
+            <aside class="w-full md:w-64 shrink-0">
+                <div class="glass-effect rounded-xl p-4 h-full">
+                    <h2 class="text-lg font-semibold mb-4 flex items-center">
+                        <i class="fa fa-folder mr-2"></i>
+                        网站分类
+                    </h2>
+                    <div id="categories-list" class="space-y-2">
+                        <!-- 分类将动态生成 -->
+                    </div>
+                </div>
+            </aside>
 
+            <!-- 右侧网站卡片区域 -->
+            <main class="flex-1">
+                <div id="empty-state" class="flex flex-col items-center justify-center h-64 glass-effect rounded-xl">
+                    <div class="text-apple-gray text-6xl mb-4">
+                        <i class="fa fa-file-text-o"></i>
+                    </div>
+                    <h3 class="text-xl font-medium mb-2">暂无网站记录</h3>
+                    <p class="text-apple-gray text-center max-w-md">点击上方"添加网站"按钮来创建你的第一个网站记录，或者添加一个新的分类。</p>
+                </div>
+
+                <div id="search-result-empty" class="hidden flex flex-col items-center justify-center h-64 glass-effect rounded-xl">
+                    <div class="text-apple-gray text-6xl mb-4">
+                        <i class="fa fa-search"></i>
+                    </div>
+                    <h3 class="text-xl font-medium mb-2">未找到匹配结果</h3>
+                    <p class="text-apple-gray text-center max-w-md">没有找到与搜索关键词匹配的网站，请尝试其他关键词。</p>
+                </div>
+
+                <div id="websites-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 hidden">
+                    <!-- 网站卡片将动态生成 -->
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- 添加分类模态框 -->
+    <div id="add-category-modal" class="fixed inset-0 bg-black/30 flex items-center justify-center z-50 hidden backdrop-blur-apple">
+        <div class="form-apple max-w-md w-full mx-4 shadow-xl transform transition-all">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-semibold">添加新分类</h3>
+                <button id="close-category-modal" class="text-apple-gray hover:text-dark">
+                    <i class="fa fa-times"></i>
+                </button>
+            </div>
+            <form id="add-category-form" class="space-y-4">
+                <div>
+                    <label for="category-name" class="block text-sm font-medium text-gray-700 mb-1">分类名称</label>
+                    <input type="text" id="category-name" class="input-apple" placeholder="请输入分类名称" required>
+                </div>
+                <div class="flex justify-end space-x-2">
+                    <button type="button" id="cancel-add-category" class="btn-apple-secondary">取消</button>
+                    <button type="submit" class="btn-apple-primary">添加</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 添加/编辑网站模态框 -->
+    <div id="website-modal" class="fixed inset-0 bg-black/30 flex items-center justify-center z-50 hidden backdrop-blur-apple">
+        <div class="form-apple max-w-2xl w-full mx-4 shadow-xl transform transition-all">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-semibold" id="website-modal-title">添加新网站</h3>
+                <button id="close-website-modal" class="text-apple-gray hover:text-dark">
+                    <i class="fa fa-times"></i>
+                </button>
+            </div>
+            <form id="website-form" class="space-y-4">
+                <input type="hidden" id="website-id">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label for="website-name" class="block text-sm font-medium text-gray-700 mb-1">网站名称</label>
+                        <input type="text" id="website-name" class="input-apple" placeholder="请输入网站名称" required>
+                    </div>
+                    <div>
+                        <label for="website-category" class="block text-sm font-medium text-gray-700 mb-1">所属分类</label>
+                        <select id="website-category" class="input-apple" required>
+                            <option value="">请选择分类</option>
+                            <!-- 分类选项将动态生成 -->
+                        </select>
+                    </div>
+                    <div class="md:col-span-2">
+                        <label for="website-url" class="block text-sm font-medium text-gray-700 mb-1">网站地址</label>
+                        <input type="url" id="website-url" class="input-apple" placeholder="https://" required>
+                    </div>
+                    <div class="md:col-span-2">
+                        <label for="website-description" class="block text-sm font-medium text-gray-700 mb-1">网站描述</label>
+                        <textarea id="website-description" class="input-apple" rows="2" placeholder="请输入网站描述"></textarea>
+                    </div>
+                </div>
+
+                <div class="space-y-4" id="accounts-container">
+                    <!-- 账号信息将动态生成 -->
+                </div>
+
+                <button type="button" id="add-account-btn" class="btn-apple-secondary flex items-center w-full justify-center">
+                    <i class="fa fa-plus mr-2"></i>
+                    添加账号
+                </button>
+
+                <div class="flex justify-end space-x-2">
+                    <button type="button" id="cancel-website" class="btn-apple-secondary">取消</button>
+                    <button type="submit" class="btn-apple-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 查看详情模态框 -->
+    <div id="view-details-modal" class="fixed inset-0 bg-black/30 flex items-center justify-center z-50 hidden backdrop-blur-apple">
+        <div class="form-apple max-w-2xl w-full mx-4 shadow-xl transform transition-all">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-semibold" id="details-title">网站详情</h3>
+                <div class="flex space-x-2">
+                    <button id="edit-website-btn" class="text-apple-blue hover:text-blue-700">
+                        <i class="fa fa-pencil"></i>
+                    </button>
+                    <button id="close-details-modal" class="text-apple-gray hover:text-dark">
+                        <i class="fa fa-times"></i>
+                    </button>
+                </div>
+            </div>
+            <div id="website-details" class="space-y-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <h4 class="text-sm font-medium text-apple-gray mb-1">网站名称</h4>
+                        <p id="details-name" class="font-medium"></p>
+                    </div>
+                    <div>
+                        <h4 class="text-sm font-medium text-apple-gray mb-1">所属分类</h4>
+                        <p id="details-category" class="font-medium"></p>
+                    </div>
+                    <div class="md:col-span-2">
+                        <h4 class="text-sm font-medium text-apple-gray mb-1">网站地址</h4>
+                        <p id="details-url" class="font-medium text-apple-blue hover:underline cursor-pointer"></p>
+                    </div>
+                    <div class="md:col-span-2">
+                        <h4 class="text-sm font-medium text-apple-gray mb-1">网站描述</h4>
+                        <p id="details-description"></p>
+                    </div>
+                </div>
+
+                <div id="details-accounts" class="space-y-4">
+                    <!-- 账号信息将动态生成 -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 导入确认模态框 -->
+    <div id="import-modal" class="fixed inset-0 bg-black/30 flex items-center justify-center z-50 hidden backdrop-blur-apple">
+        <div class="form-apple max-w-md w-full mx-4 shadow-xl transform transition-all">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-semibold">导入数据</h3>
+                <button id="close-import-modal" class="text-apple-gray hover:text-dark">
+                    <i class="fa fa-times"></i>
+                </button>
+            </div>
+            <div class="space-y-4">
+                <p class="text-apple-gray">请选择导出的JSON文件进行导入。导入将覆盖当前所有数据。</p>
+                <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:bg-gray-50 transition-colors">
+                    <input type="file" id="import-file" accept=".json" class="hidden">
+                    <label for="import-file" class="cursor-pointer">
+                        <i class="fa fa-file-text-o text-4xl text-apple-gray mb-2"></i>
+                        <p class="text-apple-blue">点击或拖拽文件到此处</p>
+                        <p class="text-xs text-apple-gray mt-1">支持 .json 格式文件</p>
+                    </label>
+                </div>
+                <div class="flex justify-end space-x-2">
+                    <button type="button" id="cancel-import" class="btn-apple-secondary">取消</button>
+                    <button type="button" id="confirm-import" class="btn-apple-primary">确认导入</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 复制提示 -->
+    <div id="copy-toast" class="fixed bottom-4 right-4 bg-dark text-white px-4 py-2 rounded-lg shadow-lg transform translate-y-16 opacity-0 transition-all duration-300 glass-effect-dark">
+        <i class="fa fa-check-circle mr-2"></i>
+        <span id="copy-message">已复制到剪贴板</span>
+    </div>
+
+    <script>
         // 全局数据模型
         const data = {
             categories: [
@@ -37,82 +342,22 @@
             websites: [],
             nextWebsiteId: 1,
             nextCategoryId: 2,
-            verificationCode: '329650317',
-            cloudSynced: false
+            verificationCode: '329650317'
         };
 
-        let currentUser = null;
+        // 当前筛选条件
+        const filter = {
+            categoryId: 'all',
+            searchTerm: ''
+        };
 
         // 初始化函数
         function init() {
-            // 监听登录状态
-            onAuthStateChanged(auth, (user) => {
-                if (user) {
-                    currentUser = user;
-                    console.log("用户已登录，ID:", user.uid);
-                    loadDataFromCloud();
-                } else {
-                    currentUser = null;
-                    console.log("用户未登录");
-                    loadLocalData();
-                }
-            });
-
-            // 尝试匿名登录
-            signInAnonymously(auth)
-                .catch((error) => {
-                    console.error("匿名登录失败:", error);
-                    showCopyToast('云端同步失败，使用本地存储');
-                    loadLocalData();
-                });
-
-            // 添加同步状态指示器
-            addSyncIndicator();
+            // 加载本地数据
+            loadLocalData();
             
             // 初始化事件监听
             initEventListeners();
-        }
-
-        // 从云端加载数据
-        function loadDataFromCloud() {
-            if (!currentUser) return;
-
-            const userRef = ref(db, `users/${currentUser.uid}`);
-            
-            onValue(userRef, (snapshot) => {
-                const cloudData = snapshot.val();
-                if (cloudData) {
-                    Object.assign(data, cloudData);
-                    data.cloudSynced = true;
-                    renderCategories();
-                    renderWebsites();
-                    showCopyToast('已同步云端数据');
-                } else {
-                    // 云端无数据时加载本地数据并同步到云端
-                    loadLocalData();
-                    saveDataToCloud();
-                }
-            }, (error) => {
-                console.error("云端数据监听失败:", error);
-                data.cloudSynced = false;
-                showCopyToast('云端连接失败');
-            });
-        }
-
-        // 保存数据到云端
-        function saveDataToCloud() {
-            if (!currentUser) return;
-
-            const userRef = ref(db, `users/${currentUser.uid}`);
-            set(userRef, data)
-                .then(() => {
-                    data.cloudSynced = true;
-                    console.log("数据已同步到云端");
-                })
-                .catch((error) => {
-                    console.error("云端保存失败:", error);
-                    data.cloudSynced = false;
-                });
         }
 
         // 加载本地数据
@@ -124,50 +369,19 @@
                     Object.assign(data, parsedData);
                 } catch (e) {
                     console.error('解析本地数据失败:', e);
+                    showCopyToast('数据解析失败，使用默认设置');
                 }
             }
             renderCategories();
             renderWebsites();
         }
 
-        // 保存数据（本地+云端）
+        // 保存数据到本地
         function saveData() {
             localStorage.setItem('passwordManagerData', JSON.stringify(data));
-            if (currentUser) {
-                saveDataToCloud();
-            }
         }
 
-        // 添加同步状态指示器
-        function addSyncIndicator() {
-            const header = document.querySelector('header .flex.items-center.justify-between');
-            const syncIndicator = document.createElement('div');
-            syncIndicator.className = 'flex items-center text-sm mx-4';
-            syncIndicator.innerHTML = `
-                <i class="fa fa-cloud mr-1" id="sync-icon"></i>
-                <span id="sync-status">同步中...</span>
-            `;
-            header.appendChild(syncIndicator);
-
-            // 更新同步状态显示
-            setInterval(() => {
-                const icon = document.getElementById('sync-icon');
-                const status = document.getElementById('sync-status');
-
-                if (data.cloudSynced) {
-                    icon.className = 'fa fa-cloud text-apple-green mr-1';
-                    status.textContent = '已同步';
-                } else if (currentUser) {
-                    icon.className = 'fa fa-cloud text-apple-yellow mr-1';
-                    status.textContent = '同步中...';
-                } else {
-                    icon.className = 'fa fa-cloud text-apple-red mr-1';
-                    status.textContent = '本地存储';
-                }
-            }, 1000);
-        }
-
-        // 以下为原有功能函数（保持不变）
+        // 初始化事件监听
         function initEventListeners() {
             // 登录表单提交
             document.getElementById('login-form').addEventListener('submit', function(e) {
@@ -224,6 +438,7 @@
             // 添加网站按钮
             document.getElementById('add-website-btn').addEventListener('click', function() {
                 resetWebsiteForm();
+                document.getElementById('website-modal-title').textContent = '添加新网站';
                 document.getElementById('website-modal').classList.remove('hidden');
                 document.getElementById('website-name').focus();
             });
@@ -296,15 +511,17 @@
                 if (id) {
                     document.getElementById('view-details-modal').classList.add('hidden');
                     loadWebsiteForm(id);
+                    document.getElementById('website-modal-title').textContent = '编辑网站';
                     document.getElementById('website-modal').classList.remove('hidden');
                 }
             });
 
-            // 密码显示切换
+            // 密码显示切换（修复编辑状态下的问题）
             document.addEventListener('click', function(e) {
-                if (e.target.classList.contains('toggle-password')) {
-                    const input = e.target.closest('.relative').querySelector('input');
-                    const icon = e.target.querySelector('i');
+                if (e.target.closest('.toggle-password')) {
+                    const btn = e.target.closest('.toggle-password');
+                    const input = btn.parentElement.querySelector('input');
+                    const icon = btn.querySelector('i');
                     
                     if (input.type === 'password') {
                         input.type = 'text';
@@ -345,10 +562,31 @@
             document.addEventListener('click', function(e) {
                 if (e.target.closest('.category-item')) {
                     const catId = e.target.closest('.category-item').dataset.id;
+                    filter.categoryId = catId;
                     document.querySelectorAll('.category-item').forEach(item => {
                         item.classList.toggle('bg-white/70', item.dataset.id === catId);
                     });
-                    renderWebsites(catId);
+                    renderWebsites();
+                }
+            });
+
+            // 搜索功能
+            document.getElementById('search-input').addEventListener('input', function(e) {
+                filter.searchTerm = e.target.value.trim().toLowerCase();
+                renderWebsites();
+            });
+
+            // 网址点击跳转
+            document.addEventListener('click', function(e) {
+                // 卡片中的网址点击
+                if (e.target.classList.contains('website-url-link')) {
+                    const url = e.target.textContent;
+                    window.open(url, '_blank');
+                }
+                // 详情中的网址点击
+                else if (e.target.id === 'details-url') {
+                    const url = e.target.textContent;
+                    window.open(url, '_blank');
                 }
             });
 
@@ -378,6 +616,33 @@
                     grid.insertBefore(draggedItem, afterEl);
                 } else if (draggedItem) {
                     grid.appendChild(draggedItem);
+                }
+            });
+
+            // 导出数据
+            document.getElementById('export-btn').addEventListener('click', exportData);
+
+            // 导入数据相关
+            document.getElementById('import-btn').addEventListener('click', function() {
+                document.getElementById('import-file').value = '';
+                document.getElementById('import-modal').classList.remove('hidden');
+            });
+
+            document.getElementById('close-import-modal').addEventListener('click', function() {
+                document.getElementById('import-modal').classList.add('hidden');
+            });
+
+            document.getElementById('cancel-import').addEventListener('click', function() {
+                document.getElementById('import-modal').classList.add('hidden');
+            });
+
+            document.getElementById('confirm-import').addEventListener('click', importData);
+
+            // 导入文件选择变化
+            document.getElementById('import-file').addEventListener('change', function(e) {
+                if (e.target.files.length > 0) {
+                    const fileName = e.target.files[0].name;
+                    showCopyToast(`已选择文件: ${fileName}`);
                 }
             });
         }
@@ -422,23 +687,44 @@
         }
 
         // 渲染网站卡片
-        function renderWebsites(categoryId = 'all') {
+        function renderWebsites() {
             const grid = document.getElementById('websites-grid');
             const empty = document.getElementById('empty-state');
+            const searchEmpty = document.getElementById('search-result-empty');
             
+            // 应用分类筛选
             let filtered = data.websites;
-            if (categoryId !== 'all') {
-                filtered = data.websites.filter(w => w.categoryId === categoryId);
+            if (filter.categoryId !== 'all') {
+                filtered = data.websites.filter(w => w.categoryId === filter.categoryId);
+            }
+            
+            // 应用搜索筛选
+            if (filter.searchTerm) {
+                filtered = filtered.filter(w => 
+                    w.name.toLowerCase().includes(filter.searchTerm) ||
+                    w.url.toLowerCase().includes(filter.searchTerm) ||
+                    w.description.toLowerCase().includes(filter.searchTerm)
+                );
+            }
+            
+            // 显示空状态或结果
+            if (data.websites.length === 0) {
+                grid.classList.add('hidden');
+                searchEmpty.classList.add('hidden');
+                empty.classList.remove('hidden');
+                return;
             }
             
             if (filtered.length === 0) {
                 grid.classList.add('hidden');
-                empty.classList.remove('hidden');
+                empty.classList.add('hidden');
+                searchEmpty.classList.remove('hidden');
                 return;
             }
             
             grid.classList.remove('hidden');
             empty.classList.add('hidden');
+            searchEmpty.classList.add('hidden');
             grid.innerHTML = '';
             
             filtered.forEach(website => {
@@ -456,7 +742,7 @@
                             <span class="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">${cat.name}</span>
                         </div>
                         <div class="text-sm text-apple-gray mb-3 line-clamp-2">${website.description || '无描述'}</div>
-                        <div class="text-sm text-apple-blue mb-4 hover:underline truncate">${website.url}</div>
+                        <div class="text-sm text-apple-blue mb-4 hover:underline truncate website-url-link cursor-pointer">${website.url}</div>
                         <div class="space-y-2">
                             <div class="flex items-center justify-between p-2 bg-white/50 rounded-lg">
                                 <div class="flex items-center">
@@ -667,7 +953,7 @@
             saveData();
         }
 
-        // 显示复制提示
+        // 显示提示
         function showCopyToast(message) {
             const toast = document.getElementById('copy-toast');
             document.getElementById('copy-message').textContent = message;
@@ -679,283 +965,81 @@
             }, 2000);
         }
 
+        // 导出数据
+        function exportData() {
+            // 创建要导出的数据对象
+            const exportData = {
+                categories: data.categories,
+                websites: data.websites,
+                nextWebsiteId: data.nextWebsiteId,
+                nextCategoryId: data.nextCategoryId,
+                exportTime: new Date().toISOString()
+            };
+            
+            // 转换为JSON字符串
+            const jsonString = JSON.stringify(exportData, null, 2);
+            
+            // 创建Blob并下载
+            const blob = new Blob([jsonString], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `桓健密码管理器_数据导出_${new Date().toLocaleDateString().replace(/\//g, '-')}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            showCopyToast('数据导出成功');
+        }
+
+        // 导入数据
+        function importData() {
+            const fileInput = document.getElementById('import-file');
+            if (!fileInput.files || fileInput.files.length === 0) {
+                showCopyToast('请先选择要导入的文件');
+                return;
+            }
+            
+            const file = fileInput.files[0];
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                try {
+                    const importedData = JSON.parse(e.target.result);
+                    
+                    // 验证导入的数据结构
+                    if (importedData.categories && importedData.websites && 
+                        typeof importedData.nextWebsiteId === 'number' && 
+                        typeof importedData.nextCategoryId === 'number') {
+                        
+                        // 更新数据
+                        data.categories = importedData.categories;
+                        data.websites = importedData.websites;
+                        data.nextWebsiteId = importedData.nextWebsiteId;
+                        data.nextCategoryId = importedData.nextCategoryId;
+                        
+                        // 保存并重新渲染
+                        saveData();
+                        renderCategories();
+                        renderWebsites();
+                        
+                        document.getElementById('import-modal').classList.add('hidden');
+                        showCopyToast('数据导入成功');
+                    } else {
+                        throw new Error('数据格式不正确');
+                    }
+                } catch (error) {
+                    console.error('导入失败:', error);
+                    showCopyToast('导入失败，文件格式不正确');
+                }
+            };
+            
+            reader.readAsText(file);
+        }
+
         // 页面加载完成后初始化
         window.addEventListener('DOMContentLoaded', init);
     </script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        primary: '#0071e3',
-                        secondary: '#f5f5f7',
-                        dark: '#1d1d1f',
-                        'apple-gray': '#86868b',
-                        'apple-light-gray': '#fbfbfd',
-                        'apple-blue': '#0071e3',
-                        'apple-green': '#34c759',
-                        'apple-red': '#ff3b30',
-                        'apple-yellow': '#ffcc00',
-                    },
-                    fontFamily: {
-                        sans: ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif'],
-                    },
-                }
-            }
-        }
-    </script>
-    <style type="text/tailwindcss">
-        @layer utilities {
-            .content-auto {
-                content-visibility: auto;
-            }
-            .backdrop-blur-apple {
-                backdrop-filter: blur(20px);
-                -webkit-backdrop-filter: blur(20px);
-            }
-            .glass-effect {
-                background: rgba(255, 255, 255, 0.7);
-                backdrop-filter: blur(20px);
-                -webkit-backdrop-filter: blur(20px);
-                border: 1px solid rgba(255, 255, 255, 0.18);
-            }
-            .glass-effect-dark {
-                background: rgba(29, 29, 31, 0.7);
-                backdrop-filter: blur(20px);
-                -webkit-backdrop-filter: blur(20px);
-                border: 1px solid rgba(255, 255, 255, 0.1);
-            }
-            .card-hover {
-                transition: all 0.3s ease;
-            }
-            .card-hover:hover {
-                transform: translateY(-5px);
-                box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-            }
-            .dragging {
-                opacity: 0.5;
-                transform: scale(1.02);
-                box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-                cursor: grabbing;
-            }
-            .btn-apple {
-                @apply px-4 py-2 rounded-full transition-all duration-300 font-medium;
-            }
-            .btn-apple-primary {
-                @apply btn-apple bg-primary text-white hover:bg-primary/90 active:bg-primary/80;
-            }
-            .btn-apple-secondary {
-                @apply btn-apple bg-white/80 text-dark hover:bg-white active:bg-gray-100 border border-gray-200;
-            }
-            .input-apple {
-                @apply w-full px-4 py-2 rounded-lg bg-white/80 border border-gray-200 focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all;
-            }
-            .form-apple {
-                @apply space-y-4 p-6 rounded-xl glass-effect;
-            }
-        }
-    </style>
-</head>
-<body class="bg-secondary min-h-screen font-sans text-dark antialiased">
-    <!-- 登录页面 -->
-    <div id="login-page" class="fixed inset-0 flex items-center justify-center z-50">
-        <div class="form-apple max-w-md w-full mx-4 shadow-xl">
-            <div class="text-center mb-6">
-                <div class="w-16 h-16 mx-auto bg-primary rounded-full flex items-center justify-center mb-4">
-                    <i class="fa fa-lock text-white text-2xl"></i>
-                </div>
-                <h2 class="text-[clamp(1.5rem,3vw,2rem)] font-semibold">密码管理器</h2>
-                <p class="text-apple-gray mt-2">请输入访问验证码</p>
-            </div>
-            <form id="login-form" class="space-y-4">
-                <div>
-                    <label for="verification-code" class="block text-sm font-medium text-gray-700 mb-1">验证码</label>
-                    <input type="text" id="verification-code" class="input-apple" placeholder="请输入9位验证码" maxlength="9" pattern="[0-9]{9}" required>
-                    <p id="verification-error" class="text-apple-red text-sm mt-1 hidden">验证码错误，请重新输入</p>
-                </div>
-                <button type="submit" class="btn-apple-primary w-full">
-                    验证并进入
-                </button>
-            </form>
-        </div>
-    </div>
-
-    <!-- 主应用 -->
-    <div id="app" class="hidden">
-        <!-- 顶部导航 -->
-        <header class="sticky top-0 z-40 glass-effect">
-            <div class="container mx-auto px-4 py-3 flex items-center justify-between">
-                <div class="flex items-center space-x-2">
-                    <div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
-                        <i class="fa fa-lock text-white text-sm"></i>
-                    </div>
-                    <h1 class="text-xl font-semibold">密码管理器</h1>
-                </div>
-                <div class="flex items-center space-x-4">
-                    <button id="add-category-btn" class="btn-apple-secondary flex items-center">
-                        <i class="fa fa-folder-plus mr-2"></i>
-                        <span>添加分类</span>
-                    </button>
-                    <button id="add-website-btn" class="btn-apple-primary flex items-center">
-                        <i class="fa fa-plus mr-2"></i>
-                        <span>添加网站</span>
-                    </button>
-                    <button id="logout-btn" class="btn-apple-secondary flex items-center">
-                        <i class="fa fa-sign-out mr-2"></i>
-                        <span>退出</span>
-                    </button>
-                </div>
-            </div>
-        </header>
-
-        <div class="container mx-auto px-4 py-6 flex flex-col md:flex-row gap-6">
-            <!-- 左侧分类栏 -->
-            <aside class="w-full md:w-64 shrink-0">
-                <div class="glass-effect rounded-xl p-4 h-full">
-                    <h2 class="text-lg font-semibold mb-4 flex items-center">
-                        <i class="fa fa-folder mr-2"></i>
-                        网站分类
-                    </h2>
-                    <div id="categories-list" class="space-y-2">
-                        <!-- 分类将动态生成 -->
-                    </div>
-                </div>
-            </aside>
-
-            <!-- 右侧网站卡片区域 -->
-            <main class="flex-1">
-                <div id="empty-state" class="flex flex-col items-center justify-center h-64 glass-effect rounded-xl">
-                    <div class="text-apple-gray text-6xl mb-4">
-                        <i class="fa fa-file-text-o"></i>
-                    </div>
-                    <h3 class="text-xl font-medium mb-2">暂无网站记录</h3>
-                    <p class="text-apple-gray text-center max-w-md">点击上方"添加网站"按钮来创建你的第一个网站记录，或者添加一个新的分类。</p>
-                </div>
-
-                <div id="websites-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 hidden">
-                    <!-- 网站卡片将动态生成 -->
-                </div>
-            </main>
-        </div>
-    </div>
-
-    <!-- 添加分类模态框 -->
-    <div id="add-category-modal" class="fixed inset-0 bg-black/30 flex items-center justify-center z-50 hidden backdrop-blur-apple">
-        <div class="form-apple max-w-md w-full mx-4 shadow-xl transform transition-all">
-            <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-semibold">添加新分类</h3>
-                <button id="close-category-modal" class="text-apple-gray hover:text-dark">
-                    <i class="fa fa-times"></i>
-                </button>
-            </div>
-            <form id="add-category-form" class="space-y-4">
-                <div>
-                    <label for="category-name" class="block text-sm font-medium text-gray-700 mb-1">分类名称</label>
-                    <input type="text" id="category-name" class="input-apple" placeholder="请输入分类名称" required>
-                </div>
-                <div class="flex justify-end space-x-2">
-                    <button type="button" id="cancel-add-category" class="btn-apple-secondary">取消</button>
-                    <button type="submit" class="btn-apple-primary">添加</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- 添加/编辑网站模态框 -->
-    <div id="website-modal" class="fixed inset-0 bg-black/30 flex items-center justify-center z-50 hidden backdrop-blur-apple">
-        <div class="form-apple max-w-2xl w-full mx-4 shadow-xl transform transition-all">
-            <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-semibold" id="website-modal-title">添加新网站</h3>
-                <button id="close-website-modal" class="text-apple-gray hover:text-dark">
-                    <i class="fa fa-times"></i>
-                </button>
-            </div>
-            <form id="website-form" class="space-y-4">
-                <input type="hidden" id="website-id">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label for="website-name" class="block text-sm font-medium text-gray-700 mb-1">网站名称</label>
-                        <input type="text" id="website-name" class="input-apple" placeholder="请输入网站名称" required>
-                    </div>
-                    <div>
-                        <label for="website-category" class="block text-sm font-medium text-gray-700 mb-1">所属分类</label>
-                        <select id="website-category" class="input-apple" required>
-                            <option value="">请选择分类</option>
-                            <!-- 分类选项将动态生成 -->
-                        </select>
-                    </div>
-                    <div class="md:col-span-2">
-                        <label for="website-url" class="block text-sm font-medium text-gray-700 mb-1">网站地址</label>
-                        <input type="url" id="website-url" class="input-apple" placeholder="https://" required>
-                    </div>
-                    <div class="md:col-span-2">
-                        <label for="website-description" class="block text-sm font-medium text-gray-700 mb-1">网站描述</label>
-                        <textarea id="website-description" class="input-apple" rows="2" placeholder="请输入网站描述"></textarea>
-                    </div>
-                </div>
-
-                <div class="space-y-4" id="accounts-container">
-                    <!-- 账号信息将动态生成 -->
-                </div>
-
-                <button type="button" id="add-account-btn" class="btn-apple-secondary flex items-center w-full justify-center">
-                    <i class="fa fa-plus mr-2"></i>
-                    添加账号
-                </button>
-
-                <div class="flex justify-end space-x-2">
-                    <button type="button" id="cancel-website" class="btn-apple-secondary">取消</button>
-                    <button type="submit" class="btn-apple-primary">保存</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- 查看详情模态框 -->
-    <div id="view-details-modal" class="fixed inset-0 bg-black/30 flex items-center justify-center z-50 hidden backdrop-blur-apple">
-        <div class="form-apple max-w-2xl w-full mx-4 shadow-xl transform transition-all">
-            <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-semibold" id="details-title">网站详情</h3>
-                <div class="flex space-x-2">
-                    <button id="edit-website-btn" class="text-apple-blue hover:text-blue-700">
-                        <i class="fa fa-pencil"></i>
-                    </button>
-                    <button id="close-details-modal" class="text-apple-gray hover:text-dark">
-                        <i class="fa fa-times"></i>
-                    </button>
-                </div>
-            </div>
-            <div id="website-details" class="space-y-4">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <h4 class="text-sm font-medium text-apple-gray mb-1">网站名称</h4>
-                        <p id="details-name" class="font-medium"></p>
-                    </div>
-                    <div>
-                        <h4 class="text-sm font-medium text-apple-gray mb-1">所属分类</h4>
-                        <p id="details-category" class="font-medium"></p>
-                    </div>
-                    <div class="md:col-span-2">
-                        <h4 class="text-sm font-medium text-apple-gray mb-1">网站地址</h4>
-                        <p id="details-url" class="font-medium text-apple-blue hover:underline cursor-pointer"></p>
-                    </div>
-                    <div class="md:col-span-2">
-                        <h4 class="text-sm font-medium text-apple-gray mb-1">网站描述</h4>
-                        <p id="details-description"></p>
-                    </div>
-                </div>
-
-                <div id="details-accounts" class="space-y-4">
-                    <!-- 账号信息将动态生成 -->
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- 复制提示 -->
-    <div id="copy-toast" class="fixed bottom-4 right-4 bg-dark text-white px-4 py-2 rounded-lg shadow-lg transform translate-y-16 opacity-0 transition-all duration-300 glass-effect-dark">
-        <i class="fa fa-check-circle mr-2"></i>
-        <span id="copy-message">已复制到剪贴板</span>
-    </div>
 </body>
 </html>
